@@ -1,4 +1,4 @@
-using System.Diagnostics;
+using System.Runtime.InteropServices;
 
 namespace MonitorSwap;
 
@@ -6,20 +6,108 @@ public static class DisplayManager
 {
     private static int _previousPrimary = -1;
 
-    public record MonitorInfo(int Number, bool IsPrimary);
+    [DllImport("user32.dll", CharSet = CharSet.Ansi)]
+    private static extern bool EnumDisplayDevices(
+        string? lpDevice, uint iDevNum, ref DISPLAY_DEVICE lpDisplayDevice, uint dwFlags);
+
+    [DllImport("user32.dll", CharSet = CharSet.Ansi)]
+    private static extern bool EnumDisplaySettingsEx(
+        string lpszDeviceName, int iModeNum, ref DEVMODE lpDevMode, uint dwFlags);
+
+    [DllImport("user32.dll", CharSet = CharSet.Ansi)]
+    private static extern int ChangeDisplaySettingsEx(
+        string lpszDeviceName, ref DEVMODE lpDevMode, IntPtr hwnd, uint dwFlags, IntPtr lParam);
+
+    [DllImport("user32.dll", CharSet = CharSet.Ansi)]
+    private static extern int ChangeDisplaySettingsEx(
+        string? lpszDeviceName, IntPtr lpDevMode, IntPtr hwnd, uint dwFlags, IntPtr lParam);
+
+    private const int ENUM_CURRENT_SETTINGS = -1;
+    private const uint CDS_UPDATEREGISTRY = 0x01;
+    private const uint CDS_NORESET = 0x10000000;
+    private const uint CDS_SET_PRIMARY = 0x10;
+    private const uint DISPLAY_DEVICE_ATTACHED_TO_DESKTOP = 0x1;
+    private const uint DISPLAY_DEVICE_PRIMARY_DEVICE = 0x4;
+    private const int DM_POSITION = 0x20;
+    private const int DM_PELSWIDTH = 0x80000;
+    private const int DM_PELSHEIGHT = 0x100000;
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
+    public struct DISPLAY_DEVICE
+    {
+        public int cb;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+        public string DeviceName;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
+        public string DeviceString;
+        public uint StateFlags;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
+        public string DeviceID;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
+        public string DeviceKey;
+    }
+
+    [StructLayout(LayoutKind.Explicit, CharSet = CharSet.Ansi)]
+    public struct DEVMODE
+    {
+        [FieldOffset(0), MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+        public string dmDeviceName;
+        [FieldOffset(32)] public short dmSpecVersion;
+        [FieldOffset(34)] public short dmDriverVersion;
+        [FieldOffset(36)] public short dmSize;
+        [FieldOffset(38)] public short dmDriverExtra;
+        [FieldOffset(40)] public int dmFields;
+        [FieldOffset(44)] public int dmPositionX;
+        [FieldOffset(48)] public int dmPositionY;
+        [FieldOffset(52)] public int dmDisplayOrientation;
+        [FieldOffset(56)] public int dmDisplayFixedOutput;
+        [FieldOffset(60)] public short dmColor;
+        [FieldOffset(62)] public short dmDuplex;
+        [FieldOffset(64)] public short dmYResolution;
+        [FieldOffset(66)] public short dmTTOption;
+        [FieldOffset(68)] public short dmCollate;
+        [FieldOffset(70), MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+        public string dmFormName;
+        [FieldOffset(102)] public short dmLogPixels;
+        [FieldOffset(104)] public int dmBitsPerPel;
+        [FieldOffset(108)] public int dmPelsWidth;
+        [FieldOffset(112)] public int dmPelsHeight;
+        [FieldOffset(116)] public int dmDisplayFlags;
+        [FieldOffset(120)] public int dmDisplayFrequency;
+    }
+
+    public record MonitorInfo(int Number, string DeviceName, bool IsPrimary, int X, int Y);
 
     public static List<MonitorInfo> GetMonitors()
     {
-        return Screen.AllScreens
-            .Select(s => new MonitorInfo(ExtractNumber(s.DeviceName), s.Primary))
-            .OrderBy(m => m.Number)
-            .ToList();
-    }
+        var monitors = new List<MonitorInfo>();
+        var device = new DISPLAY_DEVICE { cb = Marshal.SizeOf<DISPLAY_DEVICE>() };
+        int number = 1;
 
-    private static int ExtractNumber(string deviceName)
-    {
-        var digits = new string(deviceName.Where(char.IsDigit).ToArray());
-        return int.TryParse(digits, out int n) ? n : 0;
+        for (uint i = 0; EnumDisplayDevices(null, i, ref device, 0); i++)
+        {
+            if ((device.StateFlags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP) == 0)
+            {
+                device.cb = Marshal.SizeOf<DISPLAY_DEVICE>();
+                continue;
+            }
+
+            var devMode = new DEVMODE { dmSize = (short)Marshal.SizeOf<DEVMODE>() };
+
+            if (EnumDisplaySettingsEx(device.DeviceName, ENUM_CURRENT_SETTINGS, ref devMode, 0))
+            {
+                monitors.Add(new MonitorInfo(
+                    number++,
+                    device.DeviceName,
+                    (device.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE) != 0,
+                    devMode.dmPositionX,
+                    devMode.dmPositionY));
+            }
+
+            device.cb = Marshal.SizeOf<DISPLAY_DEVICE>();
+        }
+
+        return monitors;
     }
 
     public static (bool Success, string Message) TogglePrimary()
@@ -28,55 +116,61 @@ public static class DisplayManager
         if (monitors.Count < 2)
             return (false, "Only one monitor detected");
 
-        int targetNumber;
-        if (_previousPrimary > 0 && monitors.Any(m => m.Number == _previousPrimary && !m.IsPrimary))
-            targetNumber = _previousPrimary;
+        MonitorInfo? target;
+        if (_previousPrimary > 0)
+            target = monitors.FirstOrDefault(m => m.Number == _previousPrimary && !m.IsPrimary);
         else
-            targetNumber = monitors.First(m => !m.IsPrimary).Number;
+            target = null;
 
-        return SetPrimary(targetNumber);
+        target ??= monitors.First(m => !m.IsPrimary);
+
+        return SetPrimary(target.Number);
     }
 
     public static (bool Success, string Message) SetPrimary(int displayNumber)
     {
-        var nircmdPath = Path.Combine(AppContext.BaseDirectory, "nircmd.exe");
-        if (!File.Exists(nircmdPath))
-            return (false, "nircmd.exe not found next to MonitorSwap.exe");
-
-        var currentPrimary = Screen.AllScreens.FirstOrDefault(s => s.Primary);
-        if (currentPrimary != null)
-            _previousPrimary = ExtractNumber(currentPrimary.DeviceName);
-
-        try
-        {
-            using var proc = Process.Start(new ProcessStartInfo
-            {
-                FileName = nircmdPath,
-                Arguments = $"setprimarydisplay {displayNumber}",
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardError = true
-            });
-
-            if (proc == null)
-                return (false, "Failed to start nircmd");
-
-            proc.WaitForExit(5000);
-
-            if (proc.ExitCode != 0)
-                return (false, $"nircmd failed (exit {proc.ExitCode}): {proc.StandardError.ReadToEnd()}");
-
+        var monitors = GetMonitors();
+        var target = monitors.FirstOrDefault(m => m.Number == displayNumber);
+        if (target == null)
+            return (false, $"Monitor {displayNumber} not found");
+        if (target.IsPrimary)
             return (true, $"Monitor {displayNumber}");
-        }
-        catch (Exception ex)
+
+        var current = monitors.FirstOrDefault(m => m.IsPrimary);
+        if (current != null)
+            _previousPrimary = current.Number;
+
+        int offsetX = target.X;
+        int offsetY = target.Y;
+
+        foreach (var monitor in monitors)
         {
-            return (false, ex.Message);
+            var devMode = new DEVMODE { dmSize = (short)Marshal.SizeOf<DEVMODE>() };
+            EnumDisplaySettingsEx(monitor.DeviceName, ENUM_CURRENT_SETTINGS, ref devMode, 0);
+
+            devMode.dmPositionX -= offsetX;
+            devMode.dmPositionY -= offsetY;
+            devMode.dmFields = DM_POSITION | DM_PELSWIDTH | DM_PELSHEIGHT;
+
+            uint flags = CDS_UPDATEREGISTRY | CDS_NORESET;
+            if (monitor.DeviceName == target.DeviceName)
+                flags |= CDS_SET_PRIMARY;
+
+            int result = ChangeDisplaySettingsEx(
+                monitor.DeviceName, ref devMode, IntPtr.Zero, flags, IntPtr.Zero);
+            if (result != 0)
+                return (false, $"Failed to update {monitor.DeviceName} (error {result})");
         }
+
+        ChangeDisplaySettingsEx(null, IntPtr.Zero, IntPtr.Zero, 0, IntPtr.Zero);
+
+        return (true, $"Monitor {displayNumber}");
     }
 
     public static int GetPrimaryIndex()
     {
-        var primary = Screen.AllScreens.FirstOrDefault(s => s.Primary);
-        return primary != null ? ExtractNumber(primary.DeviceName) : 1;
+        var monitors = GetMonitors();
+        var primary = monitors.FirstOrDefault(m => m.IsPrimary);
+        return primary?.Number ?? 1;
     }
 }
