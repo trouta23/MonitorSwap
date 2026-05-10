@@ -126,10 +126,12 @@ public class TrayApp : ApplicationContext
 
     private void RefreshIcon()
     {
-        int primary = DisplayManager.GetPrimaryIndex();
+        var monitors = DisplayManager.GetMonitors();
+        int position = monitors.Take(2).ToList().FindIndex(m => m.IsPrimary) + 1;
+        if (position == 0) position = 1;
         var oldIcon = _trayIcon.Icon;
-        _trayIcon.Icon = CreateIcon(primary);
-        _trayIcon.Text = $"MonitorSwap - Primary: Monitor {primary}\nCtrl+Shift+M to swap";
+        _trayIcon.Icon = CreateIcon(position);
+        _trayIcon.Text = $"MonitorSwap - Primary: Monitor {position}\nCtrl+Shift+M to swap";
         oldIcon?.Dispose();
     }
 
