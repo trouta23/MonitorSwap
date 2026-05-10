@@ -140,8 +140,8 @@ public static class DisplayManager
         int offsetY = target.Y;
         log.Add($"  Target: #{target.Number} {target.DeviceName}, offset=({offsetX},{offsetY})");
 
-        var ordered = monitors.OrderByDescending(m => m.DeviceName == target.DeviceName);
-        foreach (var monitor in ordered)
+        // Phase 1: Set new primary without position changes.
+        // Let Windows handle the coordinate shift.
         {
             IntPtr pDevMode = Marshal.AllocHGlobal(DEVMODE_BUFFER);
             try
@@ -149,44 +149,24 @@ public static class DisplayManager
                 ZeroMemory(pDevMode, DEVMODE_BUFFER);
                 Marshal.WriteInt16(pDevMode, OFF_DMSIZE, (short)DEVMODE_BUFFER);
 
-                if (!EnumDisplaySettingsEx(monitor.DeviceName, ENUM_CURRENT_SETTINGS, pDevMode, 0))
+                if (!EnumDisplaySettingsEx(target.DeviceName, ENUM_CURRENT_SETTINGS, pDevMode, 0))
                 {
-                    WriteLog(log, $"EnumDisplaySettingsEx failed for {monitor.DeviceName}");
-                    return (false, $"Failed to read settings for {monitor.DeviceName}");
+                    WriteLog(log, $"EnumDisplaySettingsEx failed for {target.DeviceName}");
+                    return (false, $"Failed to read settings for {target.DeviceName}");
                 }
 
-                short dmSize = Marshal.ReadInt16(pDevMode, OFF_DMSIZE);
-                int dmFields = Marshal.ReadInt32(pDevMode, OFF_DMFIELDS);
-                int origX = Marshal.ReadInt32(pDevMode, OFF_POSITION_X);
-                int origY = Marshal.ReadInt32(pDevMode, OFF_POSITION_Y);
-                int width = Marshal.ReadInt32(pDevMode, OFF_PELS_WIDTH);
-                int height = Marshal.ReadInt32(pDevMode, OFF_PELS_HEIGHT);
-                int bpp = Marshal.ReadInt32(pDevMode, OFF_BITS_PER_PEL);
-                int freq = Marshal.ReadInt32(pDevMode, OFF_DISPLAY_FREQ);
-
-                log.Add($"  {monitor.DeviceName} BEFORE: dmSize={dmSize} dmFields=0x{dmFields:X} pos=({origX},{origY}) res={width}x{height} bpp={bpp} freq={freq}");
-
-                int newX = origX - offsetX;
-                int newY = origY - offsetY;
-                Marshal.WriteInt32(pDevMode, OFF_POSITION_X, newX);
-                Marshal.WriteInt32(pDevMode, OFF_POSITION_Y, newY);
-                Marshal.WriteInt32(pDevMode, OFF_DMFIELDS, dmFields | DM_POSITION);
-
-                uint flags = CDS_UPDATEREGISTRY | CDS_NORESET;
-                if (monitor.DeviceName == target.DeviceName)
-                    flags |= CDS_SET_PRIMARY;
-
-                log.Add($"  {monitor.DeviceName} AFTER:  pos=({newX},{newY}) flags=0x{flags:X} isPrimary={monitor.DeviceName == target.DeviceName}");
+                log.Add($"  Phase 1: Setting {target.DeviceName} as primary (no position change)");
 
                 int result = ChangeDisplaySettingsEx(
-                    monitor.DeviceName, pDevMode, IntPtr.Zero, flags, IntPtr.Zero);
+                    target.DeviceName, pDevMode, IntPtr.Zero,
+                    CDS_SET_PRIMARY | CDS_UPDATEREGISTRY, IntPtr.Zero);
 
-                log.Add($"  {monitor.DeviceName} RESULT: {result}");
+                log.Add($"  Phase 1 RESULT: {result}");
 
                 if (result != 0)
                 {
-                    WriteLog(log, $"ChangeDisplaySettingsEx returned {result}");
-                    return (false, $"Failed to update {monitor.DeviceName} (error {result})\nSee MonitorSwap.log for details");
+                    WriteLog(log, $"Phase 1 failed: {result}");
+                    return (false, $"Failed to set {target.DeviceName} as primary (error {result})\nSee MonitorSwap.log for details");
                 }
             }
             finally
@@ -195,9 +175,69 @@ public static class DisplayManager
             }
         }
 
-        ChangeDisplaySettingsEx(null, IntPtr.Zero, IntPtr.Zero, 0, IntPtr.Zero);
+        // Phase 2: Read new positions after Windows adjusted coordinates,
+        // then fix positions if needed.
+        var newMonitors = GetMonitors();
+        foreach (var m in newMonitors)
+            log.Add($"  After phase 1: #{m.Number} {m.DeviceName} primary={m.IsPrimary} pos=({m.X},{m.Y})");
 
-        log.Add("  Apply call sent. Swap complete.");
+        var newTarget = newMonitors.FirstOrDefault(m => m.DeviceName == target.DeviceName);
+        if (newTarget != null && newTarget.X == 0 && newTarget.Y == 0)
+        {
+            // Check if other monitors need position fixes
+            bool positionsCorrect = true;
+            foreach (var monitor in newMonitors)
+            {
+                var orig = monitors.FirstOrDefault(m => m.DeviceName == monitor.DeviceName);
+                if (orig == null) continue;
+                int expectedX = orig.X - offsetX;
+                int expectedY = orig.Y - offsetY;
+                if (monitor.X != expectedX || monitor.Y != expectedY)
+                {
+                    positionsCorrect = false;
+                    log.Add($"  Position drift: {monitor.DeviceName} is at ({monitor.X},{monitor.Y}), expected ({expectedX},{expectedY})");
+                }
+            }
+
+            if (!positionsCorrect)
+            {
+                log.Add("  Phase 2: Fixing positions...");
+                foreach (var monitor in newMonitors)
+                {
+                    var orig = monitors.FirstOrDefault(m => m.DeviceName == monitor.DeviceName);
+                    if (orig == null) continue;
+                    int expectedX = orig.X - offsetX;
+                    int expectedY = orig.Y - offsetY;
+                    if (monitor.X == expectedX && monitor.Y == expectedY) continue;
+
+                    IntPtr pDevMode = Marshal.AllocHGlobal(DEVMODE_BUFFER);
+                    try
+                    {
+                        ZeroMemory(pDevMode, DEVMODE_BUFFER);
+                        Marshal.WriteInt16(pDevMode, OFF_DMSIZE, (short)DEVMODE_BUFFER);
+                        EnumDisplaySettingsEx(monitor.DeviceName, ENUM_CURRENT_SETTINGS, pDevMode, 0);
+
+                        Marshal.WriteInt32(pDevMode, OFF_POSITION_X, expectedX);
+                        Marshal.WriteInt32(pDevMode, OFF_POSITION_Y, expectedY);
+                        int fields = Marshal.ReadInt32(pDevMode, OFF_DMFIELDS);
+                        Marshal.WriteInt32(pDevMode, OFF_DMFIELDS, fields | DM_POSITION);
+
+                        int result = ChangeDisplaySettingsEx(
+                            monitor.DeviceName, pDevMode, IntPtr.Zero,
+                            CDS_UPDATEREGISTRY | CDS_NORESET, IntPtr.Zero);
+
+                        log.Add($"  Phase 2: {monitor.DeviceName} pos=({expectedX},{expectedY}) RESULT: {result}");
+                    }
+                    finally
+                    {
+                        Marshal.FreeHGlobal(pDevMode);
+                    }
+                }
+                ChangeDisplaySettingsEx(null, IntPtr.Zero, IntPtr.Zero, 0, IntPtr.Zero);
+            }
+        }
+
+        log.Add("  Swap complete.");
         WriteLog(log, null);
         return (true, $"Monitor {displayNumber}");
     }
