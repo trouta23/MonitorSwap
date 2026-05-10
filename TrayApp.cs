@@ -60,7 +60,7 @@ public class TrayApp : ApplicationContext
         menu.Items.Add(new ToolStripSeparator());
 
         var monitors = DisplayManager.GetMonitors();
-        foreach (var (monitor, idx) in monitors.Select((m, i) => (m, i)))
+        foreach (var (monitor, idx) in monitors.Take(2).Select((m, i) => (m, i)))
         {
             var label = $"Monitor {idx + 1}: {monitor.DisplayName}";
             if (monitor.IsPrimary) label += " [primary]";

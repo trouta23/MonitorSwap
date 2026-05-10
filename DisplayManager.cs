@@ -117,16 +117,18 @@ public static class DisplayManager
         return monitors;
     }
 
+    private const int SwappableCount = 2;
+
     public static (bool Success, string Message) CyclePrimary()
     {
         var monitors = GetMonitors();
         if (monitors.Count < 2)
             return (false, "Only one monitor detected");
 
-        int currentIdx = monitors.FindIndex(m => m.IsPrimary);
-        int nextIdx = (currentIdx + 1) % monitors.Count;
+        var target = monitors.Take(SwappableCount).FirstOrDefault(m => !m.IsPrimary)
+            ?? monitors[0];
 
-        return SetPrimary(monitors, monitors[nextIdx]);
+        return SetPrimary(monitors, target);
     }
 
     public static (bool Success, string Message) SetPrimary(string deviceName)
