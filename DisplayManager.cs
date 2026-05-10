@@ -12,11 +12,7 @@ public static class DisplayManager
 
     [DllImport("user32.dll", CharSet = CharSet.Ansi)]
     private static extern bool EnumDisplaySettingsEx(
-        string lpszDeviceName, int iModeNum, ref DEVMODE lpDevMode, uint dwFlags);
-
-    [DllImport("user32.dll", CharSet = CharSet.Ansi)]
-    private static extern int ChangeDisplaySettingsEx(
-        string lpszDeviceName, ref DEVMODE lpDevMode, IntPtr hwnd, uint dwFlags, IntPtr lParam);
+        string lpszDeviceName, int iModeNum, IntPtr lpDevMode, uint dwFlags);
 
     [DllImport("user32.dll", CharSet = CharSet.Ansi)]
     private static extern int ChangeDisplaySettingsEx(
@@ -29,8 +25,12 @@ public static class DisplayManager
     private const uint DISPLAY_DEVICE_ATTACHED_TO_DESKTOP = 0x1;
     private const uint DISPLAY_DEVICE_PRIMARY_DEVICE = 0x4;
     private const int DM_POSITION = 0x20;
-    private const int DM_PELSWIDTH = 0x80000;
-    private const int DM_PELSHEIGHT = 0x100000;
+
+    private const int DEVMODE_BUFFER = 256;
+    private const int OFF_DMSIZE = 36;
+    private const int OFF_DMFIELDS = 40;
+    private const int OFF_POSITION_X = 44;
+    private const int OFF_POSITION_Y = 48;
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
     public struct DISPLAY_DEVICE
@@ -45,35 +45,6 @@ public static class DisplayManager
         public string DeviceID;
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
         public string DeviceKey;
-    }
-
-    [StructLayout(LayoutKind.Sequential, Pack = 1)]
-    public struct DEVMODE
-    {
-        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 32)]
-        public byte[] dmDeviceName;
-        public short dmSpecVersion;
-        public short dmDriverVersion;
-        public short dmSize;
-        public short dmDriverExtra;
-        public int dmFields;
-        public int dmPositionX;
-        public int dmPositionY;
-        public int dmDisplayOrientation;
-        public int dmDisplayFixedOutput;
-        public short dmColor;
-        public short dmDuplex;
-        public short dmYResolution;
-        public short dmTTOption;
-        public short dmCollate;
-        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 32)]
-        public byte[] dmFormName;
-        public short dmLogPixels;
-        public int dmBitsPerPel;
-        public int dmPelsWidth;
-        public int dmPelsHeight;
-        public int dmDisplayFlags;
-        public int dmDisplayFrequency;
     }
 
     public record MonitorInfo(int Number, string DeviceName, bool IsPrimary, int X, int Y);
@@ -92,21 +63,27 @@ public static class DisplayManager
                 continue;
             }
 
-            var devMode = new DEVMODE
+            IntPtr pDevMode = Marshal.AllocHGlobal(DEVMODE_BUFFER);
+            try
             {
-                dmDeviceName = new byte[32],
-                dmFormName = new byte[32],
-                dmSize = (short)Marshal.SizeOf<DEVMODE>()
-            };
+                ZeroMemory(pDevMode, DEVMODE_BUFFER);
+                Marshal.WriteInt16(pDevMode, OFF_DMSIZE, (short)DEVMODE_BUFFER);
 
-            if (EnumDisplaySettingsEx(device.DeviceName, ENUM_CURRENT_SETTINGS, ref devMode, 0))
+                if (EnumDisplaySettingsEx(device.DeviceName, ENUM_CURRENT_SETTINGS, pDevMode, 0))
+                {
+                    int posX = Marshal.ReadInt32(pDevMode, OFF_POSITION_X);
+                    int posY = Marshal.ReadInt32(pDevMode, OFF_POSITION_Y);
+
+                    monitors.Add(new MonitorInfo(
+                        number++,
+                        device.DeviceName,
+                        (device.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE) != 0,
+                        posX, posY));
+                }
+            }
+            finally
             {
-                monitors.Add(new MonitorInfo(
-                    number++,
-                    device.DeviceName,
-                    (device.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE) != 0,
-                    devMode.dmPositionX,
-                    devMode.dmPositionY));
+                Marshal.FreeHGlobal(pDevMode);
             }
 
             device.cb = Marshal.SizeOf<DISPLAY_DEVICE>();
@@ -150,26 +127,36 @@ public static class DisplayManager
 
         foreach (var monitor in monitors)
         {
-            var devMode = new DEVMODE
+            IntPtr pDevMode = Marshal.AllocHGlobal(DEVMODE_BUFFER);
+            try
             {
-                dmDeviceName = new byte[32],
-                dmFormName = new byte[32],
-                dmSize = (short)Marshal.SizeOf<DEVMODE>()
-            };
-            EnumDisplaySettingsEx(monitor.DeviceName, ENUM_CURRENT_SETTINGS, ref devMode, 0);
+                ZeroMemory(pDevMode, DEVMODE_BUFFER);
+                Marshal.WriteInt16(pDevMode, OFF_DMSIZE, (short)DEVMODE_BUFFER);
 
-            devMode.dmPositionX -= offsetX;
-            devMode.dmPositionY -= offsetY;
-            devMode.dmFields |= DM_POSITION | DM_PELSWIDTH | DM_PELSHEIGHT;
+                if (!EnumDisplaySettingsEx(monitor.DeviceName, ENUM_CURRENT_SETTINGS, pDevMode, 0))
+                    return (false, $"Failed to read settings for {monitor.DeviceName}");
 
-            uint flags = CDS_UPDATEREGISTRY | CDS_NORESET;
-            if (monitor.DeviceName == target.DeviceName)
-                flags |= CDS_SET_PRIMARY;
+                int posX = Marshal.ReadInt32(pDevMode, OFF_POSITION_X) - offsetX;
+                int posY = Marshal.ReadInt32(pDevMode, OFF_POSITION_Y) - offsetY;
+                Marshal.WriteInt32(pDevMode, OFF_POSITION_X, posX);
+                Marshal.WriteInt32(pDevMode, OFF_POSITION_Y, posY);
 
-            int result = ChangeDisplaySettingsEx(
-                monitor.DeviceName, ref devMode, IntPtr.Zero, flags, IntPtr.Zero);
-            if (result != 0)
-                return (false, $"Failed to update {monitor.DeviceName} (error {result})");
+                int fields = Marshal.ReadInt32(pDevMode, OFF_DMFIELDS);
+                Marshal.WriteInt32(pDevMode, OFF_DMFIELDS, fields | DM_POSITION);
+
+                uint flags = CDS_UPDATEREGISTRY | CDS_NORESET;
+                if (monitor.DeviceName == target.DeviceName)
+                    flags |= CDS_SET_PRIMARY;
+
+                int result = ChangeDisplaySettingsEx(
+                    monitor.DeviceName, pDevMode, IntPtr.Zero, flags, IntPtr.Zero);
+                if (result != 0)
+                    return (false, $"Failed to update {monitor.DeviceName} (error {result})");
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(pDevMode);
+            }
         }
 
         ChangeDisplaySettingsEx(null, IntPtr.Zero, IntPtr.Zero, 0, IntPtr.Zero);
@@ -182,5 +169,11 @@ public static class DisplayManager
         var monitors = GetMonitors();
         var primary = monitors.FirstOrDefault(m => m.IsPrimary);
         return primary?.Number ?? 1;
+    }
+
+    private static void ZeroMemory(IntPtr ptr, int size)
+    {
+        for (int i = 0; i < size; i++)
+            Marshal.WriteByte(ptr, i, 0);
     }
 }
