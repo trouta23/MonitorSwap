@@ -14,7 +14,7 @@ public class TrayApp : ApplicationContext
 
     private const int HOTKEY_ID = 9001;
     private const uint MOD_CONTROL = 0x0002;
-    private const uint MOD_ALT = 0x0001;
+    private const uint MOD_SHIFT = 0x0004;
     private const uint MOD_NOREPEAT = 0x4000;
 
     [DllImport("user32.dll")]
@@ -40,13 +40,13 @@ public class TrayApp : ApplicationContext
         _hotkeyWindow = new HotkeyWindow(Swap);
         bool registered = RegisterHotKey(
             _hotkeyWindow.Handle, HOTKEY_ID,
-            MOD_CONTROL | MOD_ALT | MOD_NOREPEAT,
+            MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT,
             (uint)Keys.M);
 
         if (!registered)
         {
             _trayIcon.BalloonTipTitle = "MonitorSwap";
-            _trayIcon.BalloonTipText = "Ctrl+Alt+M is taken by another app. Use the tray icon instead.";
+            _trayIcon.BalloonTipText = "Ctrl+Shift+M is taken by another app. Use the tray icon instead.";
             _trayIcon.BalloonTipIcon = ToolTipIcon.Warning;
             _trayIcon.ShowBalloonTip(3000);
         }
@@ -85,7 +85,7 @@ public class TrayApp : ApplicationContext
         menu.Items.Add(_startupItem);
 
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Hotkey: Ctrl+Alt+M").Enabled = false;
+        menu.Items.Add("Hotkey: Ctrl+Shift+M").Enabled = false;
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Exit", null, (_, _) => Exit());
 
@@ -129,7 +129,7 @@ public class TrayApp : ApplicationContext
         int primary = DisplayManager.GetPrimaryIndex();
         var oldIcon = _trayIcon.Icon;
         _trayIcon.Icon = CreateIcon(primary);
-        _trayIcon.Text = $"MonitorSwap - Primary: Monitor {primary}\nCtrl+Alt+M to swap";
+        _trayIcon.Text = $"MonitorSwap - Primary: Monitor {primary}\nCtrl+Shift+M to swap";
         oldIcon?.Dispose();
     }
 
