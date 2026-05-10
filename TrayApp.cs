@@ -60,9 +60,9 @@ public class TrayApp : ApplicationContext
         menu.Items.Add(new ToolStripSeparator());
 
         var monitors = DisplayManager.GetMonitors();
-        foreach (var (monitor, idx) in monitors.Take(2).Select((m, i) => (m, i)))
+        foreach (var monitor in monitors.Take(2))
         {
-            var label = $"Monitor {idx + 1}: {monitor.DisplayName}";
+            var label = $"Monitor {monitor.Number}";
             if (monitor.IsPrimary) label += " [primary]";
             var item = new ToolStripMenuItem(label);
             if (monitor.IsPrimary)
@@ -72,8 +72,8 @@ public class TrayApp : ApplicationContext
             }
             else
             {
-                var deviceName = monitor.DeviceName;
-                item.Click += (_, _) => SetSpecificMonitor(deviceName);
+                int number = monitor.Number;
+                item.Click += (_, _) => SetSpecificMonitor(number);
             }
             menu.Items.Add(item);
         }
@@ -92,9 +92,9 @@ public class TrayApp : ApplicationContext
         return menu;
     }
 
-    private void SetSpecificMonitor(string deviceName)
+    private void SetSpecificMonitor(int displayNumber)
     {
-        var (success, message) = DisplayManager.SetPrimary(deviceName);
+        var (success, message) = DisplayManager.SetPrimary(displayNumber);
         HandleSwapResult(success, message);
     }
 

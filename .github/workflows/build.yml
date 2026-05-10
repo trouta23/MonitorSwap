@@ -21,8 +21,17 @@ jobs:
       - name: Publish
         run: dotnet publish -r win-x64 -c Release -o publish
 
+      - name: Bundle NirCmd
+        run: |
+          Invoke-WebRequest -Uri "https://www.nirsoft.net/utils/nircmd-x64.zip" -OutFile nircmd.zip
+          Expand-Archive nircmd.zip -DestinationPath nircmd
+          Copy-Item nircmd/nircmd.exe publish/
+
+      - name: Package
+        run: Compress-Archive -Path publish/* -DestinationPath MonitorSwap.zip
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: publish/MonitorSwap.exe
+          files: MonitorSwap.zip
           generate_release_notes: true
