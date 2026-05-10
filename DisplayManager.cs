@@ -140,7 +140,8 @@ public static class DisplayManager
         int offsetY = target.Y;
         log.Add($"  Target: #{target.Number} {target.DeviceName}, offset=({offsetX},{offsetY})");
 
-        foreach (var monitor in monitors)
+        var ordered = monitors.OrderByDescending(m => m.DeviceName == target.DeviceName);
+        foreach (var monitor in ordered)
         {
             IntPtr pDevMode = Marshal.AllocHGlobal(DEVMODE_BUFFER);
             try
