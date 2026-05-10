@@ -7,20 +7,31 @@ static class Program
     [STAThread]
     static void Main()
     {
-        _mutex = new Mutex(true, "MonitorSwap_SingleInstance", out bool isNew);
-        if (!isNew)
+        try
+        {
+            _mutex = new Mutex(true, "MonitorSwap_SingleInstance", out bool isNew);
+            if (!isNew)
+            {
+                MessageBox.Show(
+                    "MonitorSwap is already running in the system tray.",
+                    "MonitorSwap",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            ApplicationConfiguration.Initialize();
+            Application.Run(new TrayApp());
+
+            GC.KeepAlive(_mutex);
+        }
+        catch (Exception ex)
         {
             MessageBox.Show(
-                "MonitorSwap is already running in the system tray.",
-                "MonitorSwap",
+                $"{ex.GetType().Name}: {ex.Message}\n\n{ex.StackTrace}",
+                "MonitorSwap - Startup Error",
                 MessageBoxButtons.OK,
-                MessageBoxIcon.Information);
-            return;
+                MessageBoxIcon.Error);
         }
-
-        ApplicationConfiguration.Initialize();
-        Application.Run(new TrayApp());
-
-        GC.KeepAlive(_mutex);
     }
 }
