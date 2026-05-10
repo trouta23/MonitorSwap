@@ -31,6 +31,12 @@ public static class DisplayManager
     private const int OFF_DMFIELDS = 40;
     private const int OFF_POSITION_X = 44;
     private const int OFF_POSITION_Y = 48;
+    private const int OFF_PELS_WIDTH = 108;
+    private const int OFF_PELS_HEIGHT = 112;
+    private const int OFF_BITS_PER_PEL = 104;
+    private const int OFF_DISPLAY_FREQ = 120;
+
+    private static readonly string LogPath = Path.Combine(AppContext.BaseDirectory, "MonitorSwap.log");
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
     public struct DISPLAY_DEVICE
@@ -111,10 +117,18 @@ public static class DisplayManager
 
     public static (bool Success, string Message) SetPrimary(int displayNumber)
     {
+        var log = new List<string> { $"=== SetPrimary({displayNumber}) at {DateTime.Now:O} ===" };
+
         var monitors = GetMonitors();
+        foreach (var m in monitors)
+            log.Add($"  Detected: #{m.Number} {m.DeviceName} primary={m.IsPrimary} pos=({m.X},{m.Y})");
+
         var target = monitors.FirstOrDefault(m => m.Number == displayNumber);
         if (target == null)
+        {
+            WriteLog(log, $"Monitor {displayNumber} not found");
             return (false, $"Monitor {displayNumber} not found");
+        }
         if (target.IsPrimary)
             return (true, $"Monitor {displayNumber}");
 
@@ -124,6 +138,7 @@ public static class DisplayManager
 
         int offsetX = target.X;
         int offsetY = target.Y;
+        log.Add($"  Target: #{target.Number} {target.DeviceName}, offset=({offsetX},{offsetY})");
 
         foreach (var monitor in monitors)
         {
@@ -134,24 +149,44 @@ public static class DisplayManager
                 Marshal.WriteInt16(pDevMode, OFF_DMSIZE, (short)DEVMODE_BUFFER);
 
                 if (!EnumDisplaySettingsEx(monitor.DeviceName, ENUM_CURRENT_SETTINGS, pDevMode, 0))
+                {
+                    WriteLog(log, $"EnumDisplaySettingsEx failed for {monitor.DeviceName}");
                     return (false, $"Failed to read settings for {monitor.DeviceName}");
+                }
 
-                int posX = Marshal.ReadInt32(pDevMode, OFF_POSITION_X) - offsetX;
-                int posY = Marshal.ReadInt32(pDevMode, OFF_POSITION_Y) - offsetY;
-                Marshal.WriteInt32(pDevMode, OFF_POSITION_X, posX);
-                Marshal.WriteInt32(pDevMode, OFF_POSITION_Y, posY);
+                short dmSize = Marshal.ReadInt16(pDevMode, OFF_DMSIZE);
+                int dmFields = Marshal.ReadInt32(pDevMode, OFF_DMFIELDS);
+                int origX = Marshal.ReadInt32(pDevMode, OFF_POSITION_X);
+                int origY = Marshal.ReadInt32(pDevMode, OFF_POSITION_Y);
+                int width = Marshal.ReadInt32(pDevMode, OFF_PELS_WIDTH);
+                int height = Marshal.ReadInt32(pDevMode, OFF_PELS_HEIGHT);
+                int bpp = Marshal.ReadInt32(pDevMode, OFF_BITS_PER_PEL);
+                int freq = Marshal.ReadInt32(pDevMode, OFF_DISPLAY_FREQ);
 
-                int fields = Marshal.ReadInt32(pDevMode, OFF_DMFIELDS);
-                Marshal.WriteInt32(pDevMode, OFF_DMFIELDS, fields | DM_POSITION);
+                log.Add($"  {monitor.DeviceName} BEFORE: dmSize={dmSize} dmFields=0x{dmFields:X} pos=({origX},{origY}) res={width}x{height} bpp={bpp} freq={freq}");
+
+                int newX = origX - offsetX;
+                int newY = origY - offsetY;
+                Marshal.WriteInt32(pDevMode, OFF_POSITION_X, newX);
+                Marshal.WriteInt32(pDevMode, OFF_POSITION_Y, newY);
+                Marshal.WriteInt32(pDevMode, OFF_DMFIELDS, dmFields | DM_POSITION);
 
                 uint flags = CDS_UPDATEREGISTRY | CDS_NORESET;
                 if (monitor.DeviceName == target.DeviceName)
                     flags |= CDS_SET_PRIMARY;
 
+                log.Add($"  {monitor.DeviceName} AFTER:  pos=({newX},{newY}) flags=0x{flags:X} isPrimary={monitor.DeviceName == target.DeviceName}");
+
                 int result = ChangeDisplaySettingsEx(
                     monitor.DeviceName, pDevMode, IntPtr.Zero, flags, IntPtr.Zero);
+
+                log.Add($"  {monitor.DeviceName} RESULT: {result}");
+
                 if (result != 0)
-                    return (false, $"Failed to update {monitor.DeviceName} (error {result})");
+                {
+                    WriteLog(log, $"ChangeDisplaySettingsEx returned {result}");
+                    return (false, $"Failed to update {monitor.DeviceName} (error {result})\nSee MonitorSwap.log for details");
+                }
             }
             finally
             {
@@ -161,6 +196,8 @@ public static class DisplayManager
 
         ChangeDisplaySettingsEx(null, IntPtr.Zero, IntPtr.Zero, 0, IntPtr.Zero);
 
+        log.Add("  Apply call sent. Swap complete.");
+        WriteLog(log, null);
         return (true, $"Monitor {displayNumber}");
     }
 
@@ -169,6 +206,14 @@ public static class DisplayManager
         var monitors = GetMonitors();
         var primary = monitors.FirstOrDefault(m => m.IsPrimary);
         return primary?.Number ?? 1;
+    }
+
+    private static void WriteLog(List<string> entries, string? error)
+    {
+        if (error != null)
+            entries.Add($"  ERROR: {error}");
+        entries.Add("");
+        try { File.AppendAllLines(LogPath, entries); } catch { }
     }
 
     private static void ZeroMemory(IntPtr ptr, int size)
