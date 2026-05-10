@@ -47,11 +47,11 @@ public static class DisplayManager
         public string DeviceKey;
     }
 
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
     public struct DEVMODE
     {
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
-        public string dmDeviceName;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 32)]
+        public byte[] dmDeviceName;
         public short dmSpecVersion;
         public short dmDriverVersion;
         public short dmSize;
@@ -66,8 +66,8 @@ public static class DisplayManager
         public short dmYResolution;
         public short dmTTOption;
         public short dmCollate;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
-        public string dmFormName;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 32)]
+        public byte[] dmFormName;
         public short dmLogPixels;
         public int dmBitsPerPel;
         public int dmPelsWidth;
@@ -92,7 +92,12 @@ public static class DisplayManager
                 continue;
             }
 
-            var devMode = new DEVMODE { dmSize = (short)Marshal.SizeOf<DEVMODE>() };
+            var devMode = new DEVMODE
+            {
+                dmDeviceName = new byte[32],
+                dmFormName = new byte[32],
+                dmSize = (short)Marshal.SizeOf<DEVMODE>()
+            };
 
             if (EnumDisplaySettingsEx(device.DeviceName, ENUM_CURRENT_SETTINGS, ref devMode, 0))
             {
@@ -145,12 +150,17 @@ public static class DisplayManager
 
         foreach (var monitor in monitors)
         {
-            var devMode = new DEVMODE { dmSize = (short)Marshal.SizeOf<DEVMODE>() };
+            var devMode = new DEVMODE
+            {
+                dmDeviceName = new byte[32],
+                dmFormName = new byte[32],
+                dmSize = (short)Marshal.SizeOf<DEVMODE>()
+            };
             EnumDisplaySettingsEx(monitor.DeviceName, ENUM_CURRENT_SETTINGS, ref devMode, 0);
 
             devMode.dmPositionX -= offsetX;
             devMode.dmPositionY -= offsetY;
-            devMode.dmFields = DM_POSITION | DM_PELSWIDTH | DM_PELSHEIGHT;
+            devMode.dmFields |= DM_POSITION | DM_PELSWIDTH | DM_PELSHEIGHT;
 
             uint flags = CDS_UPDATEREGISTRY | CDS_NORESET;
             if (monitor.DeviceName == target.DeviceName)
