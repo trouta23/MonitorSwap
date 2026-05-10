@@ -117,14 +117,33 @@ public static class DisplayManager
         return monitors;
     }
 
-    public static (bool Success, string Message) SwapPrimary()
+    public static (bool Success, string Message) CyclePrimary()
     {
         var monitors = GetMonitors();
         if (monitors.Count < 2)
             return (false, "Only one monitor detected");
 
-        var target = monitors.First(m => !m.IsPrimary);
+        int currentIdx = monitors.FindIndex(m => m.IsPrimary);
+        int nextIdx = (currentIdx + 1) % monitors.Count;
 
+        return SetPrimary(monitors, monitors[nextIdx]);
+    }
+
+    public static (bool Success, string Message) SetPrimary(string deviceName)
+    {
+        var monitors = GetMonitors();
+        var target = monitors.FirstOrDefault(m => m.DeviceName == deviceName);
+        if (target == null)
+            return (false, $"Monitor {deviceName} not found");
+        if (target.IsPrimary)
+            return (true, target.DisplayName);
+
+        return SetPrimary(monitors, target);
+    }
+
+    private static (bool Success, string Message) SetPrimary(
+        List<MonitorInfo> monitors, MonitorInfo target)
+    {
         int offsetX = target.X;
         int offsetY = target.Y;
 

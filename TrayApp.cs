@@ -64,7 +64,18 @@ public class TrayApp : ApplicationContext
         {
             var label = $"Monitor {idx + 1}: {monitor.DisplayName}";
             if (monitor.IsPrimary) label += " [primary]";
-            menu.Items.Add(label).Enabled = false;
+            var item = new ToolStripMenuItem(label);
+            if (monitor.IsPrimary)
+            {
+                item.Checked = true;
+                item.Enabled = false;
+            }
+            else
+            {
+                var deviceName = monitor.DeviceName;
+                item.Click += (_, _) => SetSpecificMonitor(deviceName);
+            }
+            menu.Items.Add(item);
         }
 
         menu.Items.Add(new ToolStripSeparator());
@@ -81,10 +92,20 @@ public class TrayApp : ApplicationContext
         return menu;
     }
 
+    private void SetSpecificMonitor(string deviceName)
+    {
+        var (success, message) = DisplayManager.SetPrimary(deviceName);
+        HandleSwapResult(success, message);
+    }
+
     private void Swap()
     {
-        var (success, message) = DisplayManager.SwapPrimary();
+        var (success, message) = DisplayManager.CyclePrimary();
+        HandleSwapResult(success, message);
+    }
 
+    private void HandleSwapResult(bool success, string message)
+    {
         if (success)
         {
             RefreshIcon();
