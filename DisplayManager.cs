@@ -4,7 +4,7 @@ namespace MonitorSwap;
 
 public static class DisplayManager
 {
-    private const int SwappableCount = 2;
+    private static int _previousPrimary = -1;
 
     public record MonitorInfo(int Number, bool IsPrimary);
 
@@ -22,17 +22,19 @@ public static class DisplayManager
         return int.TryParse(digits, out int n) ? n : 0;
     }
 
-    public static (bool Success, string Message) CyclePrimary()
+    public static (bool Success, string Message) TogglePrimary()
     {
         var monitors = GetMonitors();
         if (monitors.Count < 2)
             return (false, "Only one monitor detected");
 
-        var target = monitors.Take(SwappableCount).FirstOrDefault(m => !m.IsPrimary);
-        if (target == null)
-            return (false, "No swap target found");
+        int targetNumber;
+        if (_previousPrimary > 0 && monitors.Any(m => m.Number == _previousPrimary && !m.IsPrimary))
+            targetNumber = _previousPrimary;
+        else
+            targetNumber = monitors.First(m => !m.IsPrimary).Number;
 
-        return SetPrimary(target.Number);
+        return SetPrimary(targetNumber);
     }
 
     public static (bool Success, string Message) SetPrimary(int displayNumber)
@@ -40,6 +42,10 @@ public static class DisplayManager
         var nircmdPath = Path.Combine(AppContext.BaseDirectory, "nircmd.exe");
         if (!File.Exists(nircmdPath))
             return (false, "nircmd.exe not found next to MonitorSwap.exe");
+
+        var currentPrimary = Screen.AllScreens.FirstOrDefault(s => s.Primary);
+        if (currentPrimary != null)
+            _previousPrimary = ExtractNumber(currentPrimary.DeviceName);
 
         try
         {

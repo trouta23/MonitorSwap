@@ -60,7 +60,7 @@ public class TrayApp : ApplicationContext
         menu.Items.Add(new ToolStripSeparator());
 
         var monitors = DisplayManager.GetMonitors();
-        foreach (var monitor in monitors.Take(2))
+        foreach (var monitor in monitors)
         {
             var label = $"Monitor {monitor.Number}";
             if (monitor.IsPrimary) label += " [primary]";
@@ -100,7 +100,7 @@ public class TrayApp : ApplicationContext
 
     private void Swap()
     {
-        var (success, message) = DisplayManager.CyclePrimary();
+        var (success, message) = DisplayManager.TogglePrimary();
         HandleSwapResult(success, message);
     }
 
@@ -127,7 +127,7 @@ public class TrayApp : ApplicationContext
     private void RefreshIcon()
     {
         var monitors = DisplayManager.GetMonitors();
-        int position = monitors.Take(2).ToList().FindIndex(m => m.IsPrimary) + 1;
+        int position = monitors.FindIndex(m => m.IsPrimary) + 1;
         if (position == 0) position = 1;
         var oldIcon = _trayIcon.Icon;
         _trayIcon.Icon = CreateIcon(position);
