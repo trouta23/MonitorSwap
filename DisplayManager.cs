@@ -47,33 +47,33 @@ public static class DisplayManager
         public string DeviceKey;
     }
 
-    [StructLayout(LayoutKind.Explicit, CharSet = CharSet.Ansi)]
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
     public struct DEVMODE
     {
-        [FieldOffset(0), MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
         public string dmDeviceName;
-        [FieldOffset(32)] public short dmSpecVersion;
-        [FieldOffset(34)] public short dmDriverVersion;
-        [FieldOffset(36)] public short dmSize;
-        [FieldOffset(38)] public short dmDriverExtra;
-        [FieldOffset(40)] public int dmFields;
-        [FieldOffset(44)] public int dmPositionX;
-        [FieldOffset(48)] public int dmPositionY;
-        [FieldOffset(52)] public int dmDisplayOrientation;
-        [FieldOffset(56)] public int dmDisplayFixedOutput;
-        [FieldOffset(60)] public short dmColor;
-        [FieldOffset(62)] public short dmDuplex;
-        [FieldOffset(64)] public short dmYResolution;
-        [FieldOffset(66)] public short dmTTOption;
-        [FieldOffset(68)] public short dmCollate;
-        [FieldOffset(70), MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+        public short dmSpecVersion;
+        public short dmDriverVersion;
+        public short dmSize;
+        public short dmDriverExtra;
+        public int dmFields;
+        public int dmPositionX;
+        public int dmPositionY;
+        public int dmDisplayOrientation;
+        public int dmDisplayFixedOutput;
+        public short dmColor;
+        public short dmDuplex;
+        public short dmYResolution;
+        public short dmTTOption;
+        public short dmCollate;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
         public string dmFormName;
-        [FieldOffset(102)] public short dmLogPixels;
-        [FieldOffset(104)] public int dmBitsPerPel;
-        [FieldOffset(108)] public int dmPelsWidth;
-        [FieldOffset(112)] public int dmPelsHeight;
-        [FieldOffset(116)] public int dmDisplayFlags;
-        [FieldOffset(120)] public int dmDisplayFrequency;
+        public short dmLogPixels;
+        public int dmBitsPerPel;
+        public int dmPelsWidth;
+        public int dmPelsHeight;
+        public int dmDisplayFlags;
+        public int dmDisplayFrequency;
     }
 
     public record MonitorInfo(int Number, string DeviceName, bool IsPrimary, int X, int Y);
