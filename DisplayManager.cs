@@ -140,38 +140,21 @@ public static class DisplayManager
         int offsetY = target.Y;
         log.Add($"  Target: #{target.Number} {target.DeviceName}, offset=({offsetX},{offsetY})");
 
-        // Phase 1: Set new primary without position changes.
-        // Let Windows handle the coordinate shift.
+        // Phase 1: Set new primary with NULL DEVMODE.
+        // NULL tells Windows to use current registry settings - avoids DEVMODE issues.
         {
-            IntPtr pDevMode = Marshal.AllocHGlobal(DEVMODE_BUFFER);
-            try
+            log.Add($"  Phase 1: Setting {target.DeviceName} as primary (NULL DEVMODE)");
+
+            int result = ChangeDisplaySettingsEx(
+                target.DeviceName, IntPtr.Zero, IntPtr.Zero,
+                CDS_SET_PRIMARY | CDS_UPDATEREGISTRY, IntPtr.Zero);
+
+            log.Add($"  Phase 1 RESULT: {result}");
+
+            if (result != 0)
             {
-                ZeroMemory(pDevMode, DEVMODE_BUFFER);
-                Marshal.WriteInt16(pDevMode, OFF_DMSIZE, (short)DEVMODE_BUFFER);
-
-                if (!EnumDisplaySettingsEx(target.DeviceName, ENUM_CURRENT_SETTINGS, pDevMode, 0))
-                {
-                    WriteLog(log, $"EnumDisplaySettingsEx failed for {target.DeviceName}");
-                    return (false, $"Failed to read settings for {target.DeviceName}");
-                }
-
-                log.Add($"  Phase 1: Setting {target.DeviceName} as primary (no position change)");
-
-                int result = ChangeDisplaySettingsEx(
-                    target.DeviceName, pDevMode, IntPtr.Zero,
-                    CDS_SET_PRIMARY | CDS_UPDATEREGISTRY, IntPtr.Zero);
-
-                log.Add($"  Phase 1 RESULT: {result}");
-
-                if (result != 0)
-                {
-                    WriteLog(log, $"Phase 1 failed: {result}");
-                    return (false, $"Failed to set {target.DeviceName} as primary (error {result})\nSee MonitorSwap.log for details");
-                }
-            }
-            finally
-            {
-                Marshal.FreeHGlobal(pDevMode);
+                WriteLog(log, $"Phase 1 failed: {result}");
+                return (false, $"Failed to set {target.DeviceName} as primary (error {result})\nSee MonitorSwap.log for details");
             }
         }
 
